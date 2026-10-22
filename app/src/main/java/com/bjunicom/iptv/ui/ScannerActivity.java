@@ -37,6 +37,7 @@ import java.util.Locale;
  * 同时支持触屏操作与电视遥控器方向键、绿键(启动/停止扫描)、菜单键(导出报告)操作
  */
 public class ScannerActivity extends AppCompatActivity {
+    public static final String EXTRA_AUTO_START_CHECK = "auto_start_check";
 
     private RadioGroup rgScanMode;
     private EditText etScanSubnet;
@@ -71,8 +72,26 @@ public class ScannerActivity extends AppCompatActivity {
 
         bindViews();
 
-        // 默认将遥控器焦点放在「开始动态扫描」按钮上，按 OK 键即可直接开扫
-        btnStartScan.post(() -> btnStartScan.requestFocus());
+        // 网段扫描只对组播源有意义，订阅/单播源默认改为巡检频道表
+        boolean unicastPlaylist = !hasMulticastChannels();
+        if (unicastPlaylist) {
+            rgScanMode.check(R.id.rb_mode_check_playlist);
+        }
+        if (unicastPlaylist && savedInstanceState == null
+                && getIntent().getBooleanExtra(EXTRA_AUTO_START_CHECK, false)) {
+            btnStartScan.post(this::startScanning);
+        } else {
+            btnStartScan.post(() -> btnStartScan.requestFocus());
+        }
+    }
+
+    private boolean hasMulticastChannels() {
+        for (IptvChannel ch : repository.getAllChannels()) {
+            if (ch.getMulticastIp() != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void bindViews() {

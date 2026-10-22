@@ -62,6 +62,15 @@
                     android:layout_weight="1"
                     android:text="安徽联通IPTV"
                     android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btn_source_anhui_telecom"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:text="安徽电信IPTV"
+                    android:textSize="12sp" />
             </LinearLayout>
 
             <LinearLayout

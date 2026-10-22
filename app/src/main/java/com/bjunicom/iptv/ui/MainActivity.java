@@ -828,7 +828,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void openScannerActivity() {
+        openScannerActivity(false);
+    }
+
+    private void openScannerActivity(boolean autoStartCheck) {
         Intent intent = new Intent(MainActivity.this, ScannerActivity.class);
+        intent.putExtra(ScannerActivity.EXTRA_AUTO_START_CHECK, autoStartCheck);
         startActivity(intent);
     }
 
@@ -1173,6 +1178,8 @@ public class MainActivity extends AppCompatActivity {
                 v -> etSourceUrl.setText(IptvSettings.SOURCE_IPTV_ORG_CN));
         view.findViewById(R.id.btn_source_anhui).setOnClickListener(
                 v -> etSourceUrl.setText(IptvSettings.SOURCE_BUILTIN_ANHUI));
+        view.findViewById(R.id.btn_source_anhui_telecom).setOnClickListener(
+                v -> etSourceUrl.setText(IptvSettings.SOURCE_BUILTIN_ANHUI_TELECOM));
         view.findViewById(R.id.btn_source_refresh).setOnClickListener(v -> {
             repository.switchSource(etSourceUrl.getText().toString());
             tvSourceStatus.setText("正在更新直播源…");
@@ -1358,7 +1365,7 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             }
             if (keyCode == KeyEvent.KEYCODE_PROG_GREEN || keyCode == KeyEvent.KEYCODE_GUIDE) {
-                openScannerActivity();
+                openScannerActivity(true);
                 return true;
             }
             if (keyCode == KeyEvent.KEYCODE_PROG_YELLOW || keyCode == KeyEvent.KEYCODE_CAPTIONS) {

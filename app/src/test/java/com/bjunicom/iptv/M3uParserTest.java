@@ -13,6 +13,7 @@ import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class M3uParserTest {
@@ -78,5 +79,28 @@ public class M3uParserTest {
             keys.add(ch.getMulticastKey());
         }
         assertEquals(list.size(), keys.size());
+    }
+
+    @Test
+    public void testParseBundledAnhuiTelecomPlaylist() throws Exception {
+        List<IptvChannel> list;
+        try (InputStream is = new FileInputStream("src/main/assets/ah-telecom-iptv.m3u")) {
+            list = M3uParser.parse(is);
+        }
+        assertEquals(131, list.size());
+
+        IptvChannel cctv1 = list.get(0);
+        assertEquals(1, cctv1.getChannelNumber());
+        assertEquals("CCTV-1综合", cctv1.getDisplayName());
+        assertEquals("高清", cctv1.getResolutionTag());
+        assertTrue(cctv1.getGroups().contains("央视"));
+
+        Set<Integer> numbers = new HashSet<>();
+        for (IptvChannel ch : list) {
+            assertTrue(ch.getRawUrl().endsWith(".m3u8"));
+            assertNull(ch.getMulticastIp());
+            numbers.add(ch.getChannelNumber());
+        }
+        assertEquals(list.size(), numbers.size());
     }
 }

@@ -35,7 +35,7 @@ uTV — Android / Android TV 直播播放器，支持 IPTV 组播（源自北京
 
 ### 频道数据
 
-- **直播源**由 `IptvSettings.getSourceUrl()` 决定：http(s) 订阅（默认 iptv-org `cn.m3u`，拉取后缓存为 `filesDir/source_cache.m3u` + `.url` 元数据；从未拉取成功时回落到随包快照 `assets/iptv-org-cn.m3u`）、`asset://<文件>` 内置列表（如安徽联通 `ah-unicom-iptv.m3u`）或 `local://imported` 本地导入。`ChannelRepository.refreshSourceAsync()` 在启动时与设置页触发；`switchSource()`/频道表内容变化时必须删除 `modified_iptv.m3u`，否则 `mergeScanResults` 会把旧源频道当作「动态扫描发现」回灌。
+- **直播源**由 `IptvSettings.getSourceUrl()` 决定：http(s) 订阅（默认 iptv-org `cn.m3u`，拉取后缓存为 `filesDir/source_cache.m3u` + `.url` 元数据；从未拉取成功时回落到随包快照 `assets/iptv-org-cn.m3u`）、`asset://<文件>` 内置列表（安徽联通 `ah-unicom-iptv.m3u`、安徽电信 `ah-telecom-iptv.m3u`，均已按 `[台号][清晰度]` 规整）或 `local://imported` 本地导入。`ChannelRepository.refreshSourceAsync()` 在启动时与设置页触发；`switchSource()`/频道表内容变化时必须删除 `modified_iptv.m3u`，否则 `mergeScanResults` 会把旧源频道当作「动态扫描发现」回灌。
 - `parser/PlaylistNormalizer` 把 iptv-org 风格条目（英文名、`(720p)`、`[Not 24/7]`）规整为中文分组、台号（CCTV-N→N，CCTV-5+→18，其余从 21 起按央视/卫视/其它分配）与清晰度并按台号排序；标题已含 `[台号]` 的列表视为已规整不处理。分类列表由 `getCategoryGroups()` 按频道实际分组动态生成。非组播频道以 `rawUrl` 作为 `getMulticastKey()`。
 - 单播源不走池化管线：`IjkVideoView.isMulticastSource()` 为假时走常规路径，因为 `PooledStreamDownloader` 只认裸 TS，无法处理 m3u8。内置 `libijkffmpeg.so` **未编译 TLS**（仅有 HLS demuxer），所以 `https` 源自动改用 `IjkExoMediaPlayer`；http 源用 ijk 失败时 `MainActivity` 的 onError 会 `setForceExoPlayer(true)` 重试一次。组播扫描/udpxy/本地代理只对 `rtp://` 源有意义；巡检对单播源并发做 HTTP/HLS 探测（`probeUnicastHttpStream`）。
 - `applicationId` 已改为 `com.ahunicom.iptv`，Java 包名仍为 `com.bjunicom.iptv`。
@@ -44,7 +44,7 @@ uTV — Android / Android TV 直播播放器，支持 IPTV 组播（源自北京
 
 ### 扫描 / 巡检
 
-`scanner/MulticastScannerEngine`（UI 为 `ui/ScannerActivity`）三种模式：巡检现有列表、组播网段扫描、通过 `ProcessBuilder` 释放并执行 `assets/check_iptv_m3u.sh`。产物为 `iptv_YYYYMMDD_HHMMSS/` 下的 `results.csv`（UTF-8 BOM）与 `modified_iptv.m3u`。Java 侧逻辑是在复刻该脚本的输出格式，改任何一边都要对齐另一边。
+`scanner/MulticastScannerEngine`（UI 为 `ui/ScannerActivity`）三种模式：巡检现有列表、组播网段扫描、通过 `ProcessBuilder` 释放并执行 `assets/check_iptv_m3u.sh`。产物为 `iptv_YYYYMMDD_HHMMSS/` 下的 `results.csv`（UTF-8 BOM）与 `modified_iptv.m3u`。Java 侧逻辑是在复刻该脚本的输出格式，改任何一边都要对齐另一边。频道表里没有组播地址（`getMulticastIp()` 全为空）时 `ScannerActivity` 默认选中巡检模式，主界面绿键带 `EXTRA_AUTO_START_CHECK` 进入时直接开始巡检。
 
 - 根目录 `check_iptv_m3u.sh` 与 `app/src/main/assets/check_iptv_m3u.sh` 内容相同，修改需同步两份。
 - 节目源与脚本源自上游 `wuwentao/bj-unicom-iptv`。

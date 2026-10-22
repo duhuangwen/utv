@@ -41,6 +41,7 @@ public class IptvSettings {
     public static final String SOURCE_IPTV_ORG_CN = "https://iptv-org.github.io/iptv/countries/cn.m3u";
     public static final String SOURCE_ASSET_PREFIX = "asset://";
     public static final String SOURCE_BUILTIN_ANHUI = SOURCE_ASSET_PREFIX + "ah-unicom-iptv.m3u";
+    public static final String SOURCE_BUILTIN_ANHUI_TELECOM = SOURCE_ASSET_PREFIX + "ah-telecom-iptv.m3u";
     public static final String SOURCE_LOCAL_FILE = "local://imported";
 
     private final SharedPreferences prefs;
