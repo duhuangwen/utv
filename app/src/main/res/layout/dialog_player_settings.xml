@@ -212,6 +212,7 @@
                 android:buttonTint="@color/md_theme_dark_primary"
                 android:focusable="true"
                 android:paddingHorizontal="8dp"
+                android:visibility="gone"
                 android:text="包含项目仓库全部 215 个频道 (含标清及历史频道)"
                 android:textColor="@color/text_primary" />
         </LinearLayout>

@@ -5,7 +5,11 @@ import com.bjunicom.iptv.parser.M3uParser;
 
 import org.junit.Test;
 
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -51,5 +55,28 @@ public class M3uParserTest {
         String csv = M3uParser.toResultsCsvContent(list);
         assertTrue(csv.contains("编号,频道名称,video track,audio track,screenshot_name,连接flag,分辨率flag"));
         assertTrue(csv.contains("#1 h264, 1920x1080,25fps"));
+    }
+
+    @Test
+    public void testParseBundledAnhuiUnicomPlaylist() throws Exception {
+        List<IptvChannel> list;
+        try (InputStream is = new FileInputStream("src/main/assets/ah-unicom-iptv.m3u")) {
+            list = M3uParser.parse(is);
+        }
+        assertEquals(63, list.size());
+
+        IptvChannel cctv1 = list.get(0);
+        assertEquals(1, cctv1.getChannelNumber());
+        assertEquals("CCTV-1综合", cctv1.getDisplayName());
+        assertEquals("高清", cctv1.getResolutionTag());
+        assertTrue(cctv1.getGroups().contains("[高清]央视"));
+        assertEquals(cctv1.getRawUrl(), cctv1.getMulticastKey());
+
+        Set<String> keys = new HashSet<>();
+        for (IptvChannel ch : list) {
+            assertTrue(ch.getRawUrl().startsWith("http://10.255."));
+            keys.add(ch.getMulticastKey());
+        }
+        assertEquals(list.size(), keys.size());
     }
 }

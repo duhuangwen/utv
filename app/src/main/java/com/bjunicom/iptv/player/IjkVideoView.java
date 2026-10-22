@@ -256,7 +256,9 @@ public class IjkVideoView extends FrameLayout {
         try {
             Uri playbackUri = resolvePlaybackUri(mUri);
             String scheme = playbackUri.getScheme();
+            // 池化下载器只解析裸 MPEG-TS；单播 HTTP 源（如安徽联通 HLS）交给 ijk 内置 demuxer，否则 m3u8 文本会被当 TS 丢弃
             boolean useSeparatedPoolPipeline = (mSettings.getPlayerType() == IptvSettings.PLAYER_IJK)
+                    && isMulticastSource(playbackUri)
                     && scheme != null
                     && (scheme.equalsIgnoreCase("http")
                     || scheme.equalsIgnoreCase("https")
@@ -297,7 +299,7 @@ public class IjkVideoView extends FrameLayout {
                 return;
             }
 
-            // 非 IJK 模式 (ExoPlayer / AndroidMediaPlayer) 走常规播放器路径
+            // 单播 HTTP 源，或非 IJK 模式 (ExoPlayer / AndroidMediaPlayer) 走常规播放器路径
             mMediaPlayer = createFallbackPlayer(mSettings.getPlayerType());
             attachPlayerListeners(mMediaPlayer);
             mMediaPlayer.setDataSource(mAppContext, playbackUri, mHeaders);
@@ -354,6 +356,15 @@ public class IjkVideoView extends FrameLayout {
         }
     }
 
+    private boolean isMulticastSource(Uri playbackUri) {
+        String raw = !TextUtils.isEmpty(mRawChannelUrl)
+                ? mRawChannelUrl
+                : (playbackUri != null ? playbackUri.toString() : "");
+        String lower = raw.trim().toLowerCase(Locale.ROOT);
+        return lower.startsWith("rtp://") || lower.startsWith("udp://")
+                || lower.contains("/rtp/") || lower.contains("/udp/");
+    }
+
     private Uri resolvePlaybackUri(Uri sourceUri) {
         if (sourceUri == null) {
             return null;
@@ -388,6 +399,15 @@ public class IjkVideoView extends FrameLayout {
     public IMediaPlayer createFallbackPlayer(int playerType) {
         IMediaPlayer mediaPlayer;
         switch (playerType) {
+            case IptvSettings.PLAYER_IJK: {
+                IjkMediaPlayer ijkPlayer = new IjkMediaPlayer();
+                CodecDecoderPool.configureIjkOptionsForCodec(ijkPlayer, TsCodecDescriptor.createDefault(false), mSettings);
+                // 单播源编码未知，HEVC 硬解按用户设置开启，而不是按默认 H.264 描述符关闭
+                boolean hevcHw = mSettings.isMediaCodecEnabled() && mSettings.isMediaCodecHevcEnabled();
+                ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-hevc", hevcHw ? 1 : 0);
+                mediaPlayer = ijkPlayer;
+                break;
+            }
             case IptvSettings.PLAYER_IJK_EXO:
                 try {
                     mediaPlayer = new IjkExoMediaPlayer(mAppContext);

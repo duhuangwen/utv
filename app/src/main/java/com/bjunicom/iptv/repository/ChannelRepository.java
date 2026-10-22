@@ -24,13 +24,13 @@ import java.util.Set;
 /**
  * 频道数据仓库
  * 负责管理：
- * 1. 内置北京联通 IPTV 频道列表 (bj-unicom-iptv.m3u / bj-unicom-iptv-all.m3u)
+ * 1. 内置安徽联通 IPTV 频道列表 (ah-unicom-iptv.m3u，内网单播 HTTP 源)
  * 2. 动态扫描与 check_iptv_m3u.sh 生成的 modified_iptv.m3u 合并及持久化
- * 3. 分组索引 ([高清]央视, [高清]卫视, [高清]北京, [高清]北京IPTV, 4K, 少儿, 标清, 动态扫描发现, 收藏)
+ * 3. 分组索引 ([高清]央视, [高清]卫视, 少儿, 教育, 标清, 动态扫描发现, 收藏)
  */
 public class ChannelRepository {
-    private static final String ASSET_M3U_LATEST = "bj-unicom-iptv.m3u";
-    private static final String ASSET_M3U_ALL = "bj-unicom-iptv-all.m3u";
+    private static final String ASSET_M3U_LATEST = "ah-unicom-iptv.m3u";
+    private static final String ASSET_M3U_ALL = "ah-unicom-iptv.m3u";
     private static final String CUSTOM_SCANNED_M3U = "modified_iptv.m3u";
 
     public static final String GROUP_ALL = "全部频道";
@@ -38,8 +38,7 @@ public class ChannelRepository {
     public static final String GROUP_4K = "4K";
     public static final String GROUP_HD_CCTV = "[高清]央视";
     public static final String GROUP_HD_SATELLITE = "[高清]卫视";
-    public static final String GROUP_HD_BJ = "[高清]北京";
-    public static final String GROUP_HD_IPTV = "[高清]北京IPTV";
+    public static final String GROUP_EDUCATION = "教育";
     public static final String GROUP_KIDS = "少儿";
     public static final String GROUP_SD_ALL = "标清频道";
     public static final String GROUP_DISCOVERED = "动态扫描发现";
@@ -234,10 +233,8 @@ public class ChannelRepository {
         categories.add(GROUP_ALL);
         categories.add(GROUP_HD_CCTV);
         categories.add(GROUP_HD_SATELLITE);
-        categories.add(GROUP_HD_BJ);
-        categories.add(GROUP_HD_IPTV);
-        categories.add(GROUP_4K);
         categories.add(GROUP_KIDS);
+        categories.add(GROUP_EDUCATION);
         categories.add(GROUP_SD_ALL);
         categories.add(GROUP_DISCOVERED);
         categories.add(GROUP_FAVORITES);

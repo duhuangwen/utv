@@ -2,6 +2,8 @@
 
 **uTV** 是一款专为 **北京联通 IPTV** 打造的 Android / Android TV 高性能直播播放器应用。项目基于 **bilibili/ijkplayer** 播放器内核深度定制，并完整集成 **wuwentao/bj-unicom-iptv** 的节目源规范与巡检能力，支持 4K 超高清（HEVC 50fps）、高清及标清全频道流畅播放、秒级切台以及局域网组播地址动态扫描。
 
+> **安徽联通版说明（v1.1.0 起）**：内置频道表已从北京联通切换为安徽联通 `app/src/main/assets/ah-unicom-iptv.m3u`（63 个频道，源自 [qiuhaotc/AnHuiLianTongIPTV](https://github.com/qiuhaotc/AnHuiLianTongIPTV)）。安徽联通源为 IPTV 内网单播地址（`http://10.255.x.x`，部分为 HLS），播放设备必须能访问 IPTV 专网；下文中的组播扫描、udpxy 与本地组播代理仅适用于 `rtp://` 组播源。应用包名为 `com.ahunicom.iptv`，可与北京版共存。下文其余内容为原北京联通版说明。
+
 ---
 
 ## 核心功能

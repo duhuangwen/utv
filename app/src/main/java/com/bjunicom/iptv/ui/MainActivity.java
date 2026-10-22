@@ -936,7 +936,7 @@ public class MainActivity extends AppCompatActivity {
         Runnable updatePreview = () -> {
             if (inputBuf.length() == 0) {
                 tvDigits.setText("---");
-                tvPreview.setText("请选择频道号 (如: 1=CCTV1, 21=北京卫视, 85=CCTV-4K)");
+                tvPreview.setText("请选择频道号 (如: 1=CCTV1, 18=CCTV-5+, 21=安徽卫视)");
                 return;
             }
             String numStr = inputBuf.toString();

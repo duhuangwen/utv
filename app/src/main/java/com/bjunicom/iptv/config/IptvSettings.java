@@ -131,7 +131,8 @@ public class IptvSettings {
     }
 
     public String getLastChannelUrl() {
-        return prefs.getString(KEY_LAST_CHANNEL_URL, "rtp://239.3.1.129:8008");
+        return prefs.getString(KEY_LAST_CHANNEL_URL,
+                "http://10.255.126.3:8006/AHBKLIVE/00000001000000050000000000000152");
     }
 
     public void setLastChannelUrl(String url) {
