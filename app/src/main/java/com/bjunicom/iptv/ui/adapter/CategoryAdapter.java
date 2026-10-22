@@ -84,6 +84,17 @@ public class CategoryAdapter extends RecyclerView.Adapter<CategoryAdapter.ViewHo
         updateSelectionVisuals();
     }
 
+    public void setCategories(List<String> newCategories) {
+        categories.clear();
+        if (newCategories != null) {
+            categories.addAll(newCategories);
+        }
+        if (!categories.contains(selectedCategory) && !categories.isEmpty()) {
+            selectedCategory = categories.get(0);
+        }
+        updateSelectionVisuals();
+    }
+
     public String getSelectedCategory() {
         return selectedCategory;
     }

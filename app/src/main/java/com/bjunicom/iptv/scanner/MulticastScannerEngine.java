@@ -27,9 +27,11 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -70,6 +72,9 @@ public class MulticastScannerEngine {
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
     private ExecutorService workerPool;
     private Process activeShellProcess;
+
+    private static final int UNICAST_PROBE_CONCURRENCY = 8;
+    private static final int UNICAST_PROBE_HEAD_BYTES = 32 * 1024;
 
     // 北京联通高频组播端口列表 (按出现频次降序排列，加速动态扫描)
     private static final int[] FAST_UNICOM_PORTS = {
@@ -147,17 +152,38 @@ public class MulticastScannerEngine {
                 "[%s] Starting check_iptv_m3u.sh inspection in %s. Total channels: %d",
                 nowTimeStr(), runDir.getName(), total));
 
+        // 单播 HLS 需 2~3 次请求，逐个串行探测上百个频道会耗时十几分钟，故并发预探测
+        ExecutorService unicastPool = Executors.newFixedThreadPool(UNICAST_PROBE_CONCURRENCY);
+        Map<IptvChannel, Future<StreamProbeResult>> unicastProbes = new HashMap<>();
+        for (final IptvChannel ch : channels) {
+            if (isUnicastHttpChannel(ch)) {
+                unicastProbes.put(ch, unicastPool.submit(() -> probeUnicastHttpStream(ch.getRawUrl(), ch, timeoutMs)));
+            }
+        }
+        unicastPool.shutdown();
+
         int counter = 1;
         for (IptvChannel ch : channels) {
             if (cancelled.get()) {
                 emitLog(callback, scriptLog, "[" + nowTimeStr() + "] Scan cancelled by user.");
+                unicastPool.shutdownNow();
                 break;
             }
             emitLog(callback, scriptLog, String.format(Locale.US,
                     "[%s] Processing channel %d: %s (%s)",
                     nowTimeStr(), counter, ch.getRawTitle(), ch.getRawUrl()));
 
-            StreamProbeResult probe = probeChannelStream(ch.getMulticastIp(), ch.getMulticastPort(), ch, timeoutMs);
+            StreamProbeResult probe;
+            Future<StreamProbeResult> unicastProbe = unicastProbes.get(ch);
+            if (unicastProbe != null) {
+                try {
+                    probe = unicastProbe.get();
+                } catch (Exception e) {
+                    probe = new StreamProbeResult();
+                }
+            } else {
+                probe = probeChannelStream(ch.getMulticastIp(), ch.getMulticastPort(), ch, timeoutMs);
+            }
             applyProbeResultToChannel(counter, ch, probe, stats, mismatchLog, scriptLog, callback);
 
             if (callback != null) {
@@ -508,6 +534,80 @@ public class MulticastScannerEngine {
             }
         }
         return result;
+    }
+
+    private static boolean isUnicastHttpChannel(IptvChannel ch) {
+        String url = ch.getRawUrl() != null ? ch.getRawUrl().toLowerCase(Locale.ROOT) : "";
+        return TextUtils.isEmpty(ch.getMulticastIp()) && (url.startsWith("http://") || url.startsWith("https://"));
+    }
+
+    /**
+     * 探测单播 HTTP 源：裸 TS 直接校验同步字节；HLS 逐级跟随播放列表直到取到首个分片
+     */
+    private StreamProbeResult probeUnicastHttpStream(String urlStr, IptvChannel knownChannel, int timeoutMs) {
+        StreamProbeResult result = new StreamProbeResult();
+        long t0 = System.currentTimeMillis();
+        String current = urlStr;
+        try {
+            for (int depth = 0; depth < 3 && current != null && !cancelled.get(); depth++) {
+                HttpURLConnection conn = (HttpURLConnection) new URL(current).openConnection();
+                try {
+                    conn.setConnectTimeout(timeoutMs);
+                    conn.setReadTimeout(timeoutMs);
+                    conn.setInstanceFollowRedirects(true);
+                    conn.setRequestProperty("User-Agent", "Lavf/58.76.100 uTVScanner");
+                    int code = conn.getResponseCode();
+                    if (code < 200 || code >= 300) {
+                        break;
+                    }
+                    byte[] head = readHead(conn.getInputStream(), UNICAST_PROBE_HEAD_BYTES);
+                    String text = new String(head, StandardCharsets.UTF_8).replace("\uFEFF", "").trim();
+                    if (text.startsWith("#EXTM3U")) {
+                        current = firstPlaylistEntry(text, conn.getURL());
+                        continue;
+                    }
+                    // 分片可能是 fMP4/AAC 而非 TS，播放列表之后能取到数据即视为可播
+                    result.connected = containsTsSyncByte(head, head.length) || (depth > 0 && head.length > 0);
+                    break;
+                } finally {
+                    conn.disconnect();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        if (result.connected) {
+            result.resolutionFlag = knownChannel.getNameResolutionTag();
+        }
+        result.latencyMs = System.currentTimeMillis() - t0;
+        return result;
+    }
+
+    private static byte[] readHead(InputStream is, int maxBytes) throws IOException {
+        try (InputStream in = is) {
+            byte[] buf = new byte[maxBytes];
+            int total = 0;
+            int n;
+            while (total < maxBytes && (n = in.read(buf, total, maxBytes - total)) > 0) {
+                total += n;
+            }
+            byte[] out = new byte[total];
+            System.arraycopy(buf, 0, out, 0, total);
+            return out;
+        }
+    }
+
+    private static String firstPlaylistEntry(String playlist, URL base) {
+        for (String line : playlist.split("\\r?\\n")) {
+            String entry = line.trim();
+            if (!entry.isEmpty() && !entry.startsWith("#")) {
+                try {
+                    return new URL(base, entry).toString();
+                } catch (Exception e) {
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 
     private StreamProbeResult probeMulticastUdpStream(String ip, int port, IptvChannel knownChannel, int timeoutMs) {

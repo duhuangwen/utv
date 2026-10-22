@@ -1,6 +1,8 @@
 package com.bjunicom.iptv.ui;
 
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -39,6 +41,8 @@ import com.bjunicom.iptv.ui.adapter.CategoryAdapter;
 import com.bjunicom.iptv.ui.adapter.ChannelAdapter;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 import java.util.Locale;
 
@@ -61,6 +65,7 @@ public class MainActivity extends AppCompatActivity {
     private static final long HUD_AUTO_HIDE_MS = 6000L;
     private static final long NUMBER_INPUT_COMMIT_MS = 1800L;
     private static final long DOUBLE_BACK_EXIT_MS = 2000L;
+    private static final int REQUEST_IMPORT_PLAYLIST = 1001;
 
     private IjkVideoView videoView;
     private LinearLayout loadingOverlay;
@@ -151,8 +156,9 @@ public class MainActivity extends AppCompatActivity {
         setupPlayerListeners();
         refreshChannelList();
 
-        // 自动播放上次观看的频道 (默认 CCTV-1综合[1][高清])
+        // 自动播放上次观看的频道 (默认列表第一个频道)
         playInitialChannel();
+        repository.refreshSourceAsync((success, count, message) -> onSourceRefreshed(success, message, false));
 
         // 启动时如果抽屉可见，自动将遥控器焦点定位到当前播放的频道项；否则聚焦播放页 HUD 按钮
         if (drawerPanel.getVisibility() == View.VISIBLE) {
@@ -577,6 +583,18 @@ public class MainActivity extends AppCompatActivity {
         });
 
         videoView.setOnErrorListener((mp, frameworkErr, implErr) -> {
+            // 单播源走本地组播代理无意义；ijk 失败（如 HLS 分片为 https）时改用 ExoPlayer 重试一次
+            if (currentChannel != null && !fallbackToLocalProxyAttempted && videoView.isUnicastSource()) {
+                fallbackToLocalProxyAttempted = true;
+                if (settings.getPlayerType() == IptvSettings.PLAYER_IJK) {
+                    tvLoadingHint.setText("正在切换 ExoPlayer 重试 " + currentChannel.getDisplayName() + "...");
+                    videoView.setForceExoPlayer(true);
+                    videoView.setRawChannelUrl(currentChannel.getRawUrl());
+                    videoView.setVideoPath(currentChannel.getRawUrl());
+                    videoView.start();
+                    return true;
+                }
+            }
             if (currentChannel != null && !fallbackToLocalProxyAttempted) {
                 fallbackToLocalProxyAttempted = true;
                 if (settings.getStreamMode() == IptvSettings.STREAM_MODE_UDPXY) {
@@ -600,7 +618,9 @@ public class MainActivity extends AppCompatActivity {
                 currentChannel.setConnected(false);
                 channelAdapter.notifyDataSetChanged();
             }
-            tvOsdTrackInfo.setText("连接失败 (请按遥控器[菜单]检查 udpxy/内置组播代理设置，或按[绿键]打开「组播动态扫描」)");
+            tvOsdTrackInfo.setText(videoView.isUnicastSource()
+                    ? "该频道暂不可用 (可按[绿键]巡检全部频道后勾选「只显示可用」，或按[菜单]更换直播源)"
+                    : "连接失败 (请按遥控器[菜单]检查 udpxy/内置组播代理设置，或按[绿键]打开「组播动态扫描」)");
             showHudTemporarily();
             return true;
         });
@@ -627,6 +647,62 @@ public class MainActivity extends AppCompatActivity {
         tvDrawerTitle.setText("uTV" + statsSuffix);
     }
 
+    private void onSourceRefreshed(boolean success, String message, boolean userTriggered) {
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        if (categoryAdapter != null) {
+            categoryAdapter.setCategories(repository.getCategoryGroups());
+        }
+        refreshChannelList();
+
+        IptvChannel sameChannel = null;
+        if (currentChannel != null) {
+            for (IptvChannel ch : repository.getAllChannels()) {
+                if (ch.getRawUrl() != null && ch.getRawUrl().equals(currentChannel.getRawUrl())) {
+                    sameChannel = ch;
+                    break;
+                }
+            }
+        }
+        if (sameChannel != null) {
+            currentChannel = sameChannel;
+        } else {
+            playInitialChannel();
+        }
+
+        if (!TextUtils.isEmpty(message) && (userTriggered || !success)) {
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_IMPORT_PLAYLIST || resultCode != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        final Uri uri = data.getData();
+        new Thread(() -> {
+            String message;
+            boolean success;
+            try (InputStream is = getContentResolver().openInputStream(uri)) {
+                if (is == null) {
+                    throw new IOException("无法读取文件");
+                }
+                int count = repository.importPlaylist(is);
+                success = true;
+                message = "已导入本地直播源，共 " + count + " 个频道";
+            } catch (Exception e) {
+                success = false;
+                message = "导入失败: " + e.getMessage();
+            }
+            final boolean ok = success;
+            final String msg = message;
+            mainHandler.post(() -> onSourceRefreshed(ok, msg, true));
+        }, "PlaylistImport").start();
+    }
+
     private void playInitialChannel() {
         String lastUrl = settings.getLastChannelUrl();
         List<IptvChannel> all = repository.getAllChannels();
@@ -651,6 +727,7 @@ public class MainActivity extends AppCompatActivity {
         }
         currentChannel = channel;
         fallbackToLocalProxyAttempted = false;
+        videoView.setForceExoPlayer(false);
         settings.setLastChannelUrl(channel.getRawUrl());
         channelAdapter.setCurrentPlayingUrl(channel.getRawUrl());
 
@@ -1086,6 +1163,36 @@ public class MainActivity extends AppCompatActivity {
         CheckBox cbOpenSlEs = view.findViewById(R.id.cb_settings_opensles);
         CheckBox cbTextureView = view.findViewById(R.id.cb_settings_textureview);
         CheckBox cbAllChannels = view.findViewById(R.id.cb_settings_all_channels);
+        EditText etSourceUrl = view.findViewById(R.id.et_settings_source_url);
+        TextView tvSourceStatus = view.findViewById(R.id.tv_source_status);
+
+        final String previousSource = settings.getSourceUrl();
+        etSourceUrl.setText(previousSource);
+        tvSourceStatus.setText(String.format(Locale.US, "当前共 %d 个频道", repository.getAllChannels().size()));
+        view.findViewById(R.id.btn_source_iptv_org).setOnClickListener(
+                v -> etSourceUrl.setText(IptvSettings.SOURCE_IPTV_ORG_CN));
+        view.findViewById(R.id.btn_source_anhui).setOnClickListener(
+                v -> etSourceUrl.setText(IptvSettings.SOURCE_BUILTIN_ANHUI));
+        view.findViewById(R.id.btn_source_refresh).setOnClickListener(v -> {
+            repository.switchSource(etSourceUrl.getText().toString());
+            tvSourceStatus.setText("正在更新直播源…");
+            repository.refreshSourceAsync((success, count, message) -> {
+                tvSourceStatus.setText(success
+                        ? String.format(Locale.US, "更新完成，共 %d 个频道", count)
+                        : message);
+                onSourceRefreshed(success, message, false);
+            });
+        });
+        view.findViewById(R.id.btn_source_import).setOnClickListener(v -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            try {
+                startActivityForResult(intent, REQUEST_IMPORT_PLAYLIST);
+            } catch (ActivityNotFoundException e) {
+                tvSourceStatus.setText("此设备没有文件选择器，请改用订阅地址");
+            }
+        });
 
         int mode = settings.getStreamMode();
         if (mode == IptvSettings.STREAM_MODE_UDPXY) {
@@ -1154,6 +1261,15 @@ public class MainActivity extends AppCompatActivity {
                     if (prevAll != cbAllChannels.isChecked()) {
                         settings.setIncludeAllRepoChannels(cbAllChannels.isChecked());
                         repository.reloadChannels();
+                    }
+
+                    String newSource = etSourceUrl.getText().toString().trim();
+                    // 与打开对话框时比较：本地导入会在对话框打开期间改写 sourceUrl，未改输入框时不能覆盖回去
+                    if (!newSource.isEmpty() && !newSource.equals(previousSource)
+                            && !newSource.equals(settings.getSourceUrl())) {
+                        repository.switchSource(newSource);
+                        repository.refreshSourceAsync(
+                                (success, count, message) -> onSourceRefreshed(success, message, true));
                     }
 
                     refreshChannelList();

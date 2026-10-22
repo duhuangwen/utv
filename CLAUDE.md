@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-uTV — 北京联通 IPTV 的 Android / Android TV 直播播放器（单模块 `:app`，包名 `com.bjunicom.iptv`）。纯 Java，源码兼容级别 **Java 8**（`sourceCompatibility 1_8`），AGP 8.1.4 / Gradle 8.5（腾讯镜像），compileSdk/targetSdk 34，minSdk 21。播放内核为 `ijkplayer 0.8.8`，`src/main/jniLibs` 下是**自编译、开启 MP2 解码器**的四架构 `libijk*.so`，不可用 Maven 产物替换。
+uTV — Android / Android TV 直播播放器，支持 IPTV 组播（源自北京联通版）与 M3U 订阅源（单模块 `:app`，Java 包名 `com.bjunicom.iptv`）。纯 Java，源码兼容级别 **Java 8**（`sourceCompatibility 1_8`），AGP 8.1.4 / Gradle 8.5（腾讯镜像），compileSdk/targetSdk 34，minSdk 21。播放内核为 `ijkplayer 0.8.8`，`src/main/jniLibs` 下是**自编译、开启 MP2 解码器**的四架构 `libijk*.so`，不可用 Maven 产物替换。
 
 ## Commands
 
@@ -35,8 +35,9 @@ uTV — 北京联通 IPTV 的 Android / Android TV 直播播放器（单模块 `
 
 ### 频道数据
 
-- 当前内置的是**安徽联通**频道表 `assets/ah-unicom-iptv.m3u`（来自 qiuhaotc/AnHuiLianTongIPTV，内网单播 `http://10.255.x`，部分为 HLS），`ChannelRepository` 加载后再合并扫描产出的 `modified_iptv.m3u`。非组播频道以 `rawUrl` 作为 `getMulticastKey()`。
-- 单播源不走池化管线：`IjkVideoView.isMulticastSource()` 为假时由 `createFallbackPlayer(PLAYER_IJK)` 新建 `IjkMediaPlayer` 直接 `setDataSource(uri)`，因为 `PooledStreamDownloader` 只认裸 TS，无法处理 m3u8。组播扫描/udpxy/本地代理只对 `rtp://` 源有意义。
+- **直播源**由 `IptvSettings.getSourceUrl()` 决定：http(s) 订阅（默认 iptv-org `cn.m3u`，拉取后缓存为 `filesDir/source_cache.m3u` + `.url` 元数据；从未拉取成功时回落到随包快照 `assets/iptv-org-cn.m3u`）、`asset://<文件>` 内置列表（如安徽联通 `ah-unicom-iptv.m3u`）或 `local://imported` 本地导入。`ChannelRepository.refreshSourceAsync()` 在启动时与设置页触发；`switchSource()`/频道表内容变化时必须删除 `modified_iptv.m3u`，否则 `mergeScanResults` 会把旧源频道当作「动态扫描发现」回灌。
+- `parser/PlaylistNormalizer` 把 iptv-org 风格条目（英文名、`(720p)`、`[Not 24/7]`）规整为中文分组、台号（CCTV-N→N，CCTV-5+→18，其余从 21 起按央视/卫视/其它分配）与清晰度并按台号排序；标题已含 `[台号]` 的列表视为已规整不处理。分类列表由 `getCategoryGroups()` 按频道实际分组动态生成。非组播频道以 `rawUrl` 作为 `getMulticastKey()`。
+- 单播源不走池化管线：`IjkVideoView.isMulticastSource()` 为假时走常规路径，因为 `PooledStreamDownloader` 只认裸 TS，无法处理 m3u8。内置 `libijkffmpeg.so` **未编译 TLS**（仅有 HLS demuxer），所以 `https` 源自动改用 `IjkExoMediaPlayer`；http 源用 ijk 失败时 `MainActivity` 的 onError 会 `setForceExoPlayer(true)` 重试一次。组播扫描/udpxy/本地代理只对 `rtp://` 源有意义；巡检对单播源并发做 HTTP/HLS 探测（`probeUnicastHttpStream`）。
 - `applicationId` 已改为 `com.ahunicom.iptv`，Java 包名仍为 `com.bjunicom.iptv`。
 - `parser/M3uParser` 负责解析/导出，识别 `tvg-id`/`tvg-name`/`tvg-logo`/`group-title` 以及 `check_iptv_m3u.sh` 风格的轨道/分辨率信息；修改格式需同步 `M3uParserTest`。
 - 所有用户设置与收藏都在 `config/IptvSettings`（SharedPreferences）。

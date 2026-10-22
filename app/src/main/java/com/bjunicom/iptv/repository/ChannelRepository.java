@@ -1,37 +1,52 @@
 package com.bjunicom.iptv.repository;
 
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.TextUtils;
 
 import com.bjunicom.iptv.config.IptvSettings;
 import com.bjunicom.iptv.model.IptvChannel;
 import com.bjunicom.iptv.parser.M3uParser;
+import com.bjunicom.iptv.parser.PlaylistNormalizer;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 频道数据仓库
  * 负责管理：
- * 1. 内置安徽联通 IPTV 频道列表 (ah-unicom-iptv.m3u，内网单播 HTTP 源)
+ * 1. 直播源：http(s) 订阅（默认 iptv-org 中国频道，缓存于 filesDir）、内置列表（安徽联通 IPTV）或本地导入
  * 2. 动态扫描与 check_iptv_m3u.sh 生成的 modified_iptv.m3u 合并及持久化
- * 3. 分组索引 ([高清]央视, [高清]卫视, 少儿, 教育, 标清, 动态扫描发现, 收藏)
+ * 3. 按频道实际分组动态生成分类索引（央视、卫视优先，收藏置底）
  */
 public class ChannelRepository {
     private static final String ASSET_M3U_LATEST = "ah-unicom-iptv.m3u";
     private static final String ASSET_M3U_ALL = "ah-unicom-iptv.m3u";
     private static final String CUSTOM_SCANNED_M3U = "modified_iptv.m3u";
+    private static final String ASSET_IPTV_ORG_SNAPSHOT = "iptv-org-cn.m3u";
+    private static final String SOURCE_CACHE_FILE = "source_cache.m3u";
+    private static final String SOURCE_CACHE_META_FILE = "source_cache.url";
+    private static final int MAX_PLAYLIST_BYTES = 8 * 1024 * 1024;
 
     public static final String GROUP_ALL = "全部频道";
     public static final String GROUP_FAVORITES = "收藏频道";
@@ -42,6 +57,10 @@ public class ChannelRepository {
     public static final String GROUP_KIDS = "少儿";
     public static final String GROUP_SD_ALL = "标清频道";
     public static final String GROUP_DISCOVERED = "动态扫描发现";
+    private static final String[] PREFERRED_GROUP_ORDER = {
+            GROUP_HD_CCTV, PlaylistNormalizer.GROUP_CCTV, GROUP_HD_SATELLITE, PlaylistNormalizer.GROUP_SATELLITE,
+            GROUP_4K, GROUP_KIDS, GROUP_EDUCATION
+    };
 
     private static volatile ChannelRepository instance;
 
@@ -49,6 +68,8 @@ public class ChannelRepository {
     private final IptvSettings settings;
     private final List<IptvChannel> allChannels = new ArrayList<>();
     private final Map<String, IptvChannel> knownMulticastMap = new LinkedHashMap<>();
+    private final ExecutorService refreshExecutor = Executors.newSingleThreadExecutor();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private ChannelRepository(Context context) {
         this.appContext = context.getApplicationContext();
@@ -72,7 +93,7 @@ public class ChannelRepository {
         knownMulticastMap.clear();
 
         String assetName = settings.isIncludeAllRepoChannels() ? ASSET_M3U_ALL : ASSET_M3U_LATEST;
-        List<IptvChannel> baseList = loadFromAssets(assetName);
+        List<IptvChannel> baseList = loadSourceChannels();
         Set<String> favorites = settings.getFavoriteUrls();
 
         int idx = 1;
@@ -99,6 +120,177 @@ public class ChannelRepository {
         if (scannedFile.exists()) {
             mergeFromModifiedM3u(scannedFile);
         }
+    }
+
+    private List<IptvChannel> loadSourceChannels() {
+        String source = settings.getSourceUrl();
+        List<IptvChannel> list = new ArrayList<>();
+        try {
+            if (source.startsWith(IptvSettings.SOURCE_ASSET_PREFIX)) {
+                list = loadFromAssets(source.substring(IptvSettings.SOURCE_ASSET_PREFIX.length()));
+            } else if (source.equals(readCachedSourceUrl())) {
+                try (InputStream is = new FileInputStream(getSourceCacheFile())) {
+                    list = M3uParser.parse(is);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        // 订阅从未成功拉取（首次启动/离线）时用随包快照，保证开机即有频道
+        if (list.isEmpty() && IptvSettings.SOURCE_IPTV_ORG_CN.equals(source)) {
+            list = loadFromAssets(ASSET_IPTV_ORG_SNAPSHOT);
+        }
+        PlaylistNormalizer.normalize(list);
+        return list;
+    }
+
+    public interface SourceRefreshCallback {
+        void onRefreshFinished(boolean success, int channelCount, String message);
+    }
+
+    /**
+     * 后台拉取 http(s) 订阅源，成功后写入缓存并重载频道；回调在主线程执行。内置/本地导入源直接重载。
+     */
+    public void refreshSourceAsync(final SourceRefreshCallback callback) {
+        final String source = settings.getSourceUrl();
+        refreshExecutor.execute(() -> {
+            boolean success;
+            String message;
+            int count = 0;
+            if (source.startsWith("http://") || source.startsWith("https://")) {
+                try {
+                    byte[] body = downloadPlaylist(source);
+                    List<IptvChannel> parsed = M3uParser.parse(new ByteArrayInputStream(body));
+                    if (parsed.isEmpty()) {
+                        throw new IOException("未解析到任何频道");
+                    }
+                    saveSourceCache(source, body);
+                    success = true;
+                    count = parsed.size();
+                    message = "直播源已更新，共 " + count + " 个频道";
+                } catch (Throwable t) {
+                    success = false;
+                    message = "直播源更新失败: " + t.getMessage();
+                }
+            } else {
+                success = true;
+                message = null;
+            }
+            if (success) {
+                reloadChannels();
+                count = getAllChannels().size();
+            }
+            final boolean ok = success;
+            final int total = count;
+            final String msg = message;
+            mainHandler.post(() -> {
+                if (callback != null) {
+                    callback.onRefreshFinished(ok, total, msg);
+                }
+            });
+        });
+    }
+
+    public synchronized void switchSource(String sourceUrl) {
+        if (TextUtils.isEmpty(sourceUrl) || sourceUrl.trim().equals(settings.getSourceUrl())) {
+            return;
+        }
+        settings.setSourceUrl(sourceUrl);
+        deleteScanResults();
+    }
+
+    private void deleteScanResults() {
+        File scanned = new File(getScanRootDir(), CUSTOM_SCANNED_M3U);
+        if (scanned.exists()) {
+            scanned.delete();
+        }
+    }
+
+    /**
+     * 导入本地 M3U 文件并切换为本地直播源
+     */
+    public synchronized int importPlaylist(InputStream inputStream) throws IOException {
+        byte[] body = readFully(inputStream, MAX_PLAYLIST_BYTES);
+        List<IptvChannel> parsed = M3uParser.parse(new ByteArrayInputStream(body));
+        if (parsed.isEmpty()) {
+            throw new IOException("文件中未找到频道");
+        }
+        switchSource(IptvSettings.SOURCE_LOCAL_FILE);
+        saveSourceCache(IptvSettings.SOURCE_LOCAL_FILE, body);
+        reloadChannels();
+        return allChannels.size();
+    }
+
+    private byte[] downloadPlaylist(String source) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(source).openConnection();
+        try {
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(15000);
+            conn.setInstanceFollowRedirects(true);
+            conn.setRequestProperty("User-Agent", "uTV-Playlist/1.2");
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 300) {
+                throw new IOException("HTTP " + code);
+            }
+            try (InputStream is = conn.getInputStream()) {
+                return readFully(is, MAX_PLAYLIST_BYTES);
+            }
+        } finally {
+            conn.disconnect();
+        }
+    }
+
+    private static byte[] readFully(InputStream is, int maxBytes) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = is.read(buf)) > 0) {
+            out.write(buf, 0, n);
+            if (out.size() > maxBytes) {
+                throw new IOException("直播源文件过大");
+            }
+        }
+        return out.toByteArray();
+    }
+
+    private synchronized void saveSourceCache(String source, byte[] body) throws IOException {
+        byte[] previous = null;
+        File cacheFile = getSourceCacheFile();
+        if (source.equals(readCachedSourceUrl()) && cacheFile.exists()) {
+            try (InputStream is = new FileInputStream(cacheFile)) {
+                previous = readFully(is, MAX_PLAYLIST_BYTES);
+            } catch (IOException ignored) {
+            }
+        }
+        try (FileOutputStream fos = new FileOutputStream(cacheFile)) {
+            fos.write(body);
+        }
+        try (FileOutputStream fos = new FileOutputStream(getSourceMetaFile())) {
+            fos.write(source.getBytes(StandardCharsets.UTF_8));
+        }
+        // 频道表变化后旧巡检结果的 URL 已失效，若保留会被 mergeScanResults 当作「新发现」频道并回灌
+        if (!Arrays.equals(previous, body)) {
+            deleteScanResults();
+        }
+    }
+
+    private String readCachedSourceUrl() {
+        File meta = getSourceMetaFile();
+        if (!meta.exists()) {
+            return null;
+        }
+        try (InputStream is = new FileInputStream(meta)) {
+            return new String(readFully(is, 4096), StandardCharsets.UTF_8).trim();
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private File getSourceCacheFile() {
+        return new File(appContext.getFilesDir(), SOURCE_CACHE_FILE);
+    }
+
+    private File getSourceMetaFile() {
+        return new File(appContext.getFilesDir(), SOURCE_CACHE_META_FILE);
     }
 
     private List<IptvChannel> loadFromAssets(String fileName) {
@@ -229,14 +421,29 @@ public class ChannelRepository {
     }
 
     public synchronized List<String> getCategoryGroups() {
+        Set<String> present = new LinkedHashSet<>();
+        boolean anyDiscovered = false;
+        for (IptvChannel ch : allChannels) {
+            present.addAll(ch.getGroups());
+            anyDiscovered |= ch.isDiscoveredByScan();
+        }
+        present.remove(GROUP_DISCOVERED);
+
         List<String> categories = new ArrayList<>();
         categories.add(GROUP_ALL);
-        categories.add(GROUP_HD_CCTV);
-        categories.add(GROUP_HD_SATELLITE);
-        categories.add(GROUP_KIDS);
-        categories.add(GROUP_EDUCATION);
-        categories.add(GROUP_SD_ALL);
-        categories.add(GROUP_DISCOVERED);
+        for (String preferred : PREFERRED_GROUP_ORDER) {
+            if (present.remove(preferred)) {
+                categories.add(preferred);
+            }
+        }
+        boolean hasOther = present.remove(PlaylistNormalizer.GROUP_OTHER);
+        categories.addAll(present);
+        if (hasOther) {
+            categories.add(PlaylistNormalizer.GROUP_OTHER);
+        }
+        if (anyDiscovered) {
+            categories.add(GROUP_DISCOVERED);
+        }
         categories.add(GROUP_FAVORITES);
         return categories;
     }

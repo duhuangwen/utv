@@ -36,6 +36,12 @@ public class IptvSettings {
     private static final String KEY_SCAN_END_HOST = "scan_end_host";
     private static final String KEY_SCAN_TIMEOUT_MS = "scan_timeout_ms";
     private static final String KEY_FAVORITES = "favorite_urls";
+    private static final String KEY_SOURCE_URL = "source_url";
+
+    public static final String SOURCE_IPTV_ORG_CN = "https://iptv-org.github.io/iptv/countries/cn.m3u";
+    public static final String SOURCE_ASSET_PREFIX = "asset://";
+    public static final String SOURCE_BUILTIN_ANHUI = SOURCE_ASSET_PREFIX + "ah-unicom-iptv.m3u";
+    public static final String SOURCE_LOCAL_FILE = "local://imported";
 
     private final SharedPreferences prefs;
 
@@ -122,6 +128,18 @@ public class IptvSettings {
         prefs.edit().putBoolean(KEY_INCLUDE_HISTORICAL, include).apply();
     }
 
+    /**
+     * 直播源地址：http(s) 订阅地址、{@link #SOURCE_ASSET_PREFIX} 内置列表或 {@link #SOURCE_LOCAL_FILE} 本地导入
+     */
+    public String getSourceUrl() {
+        String url = prefs.getString(KEY_SOURCE_URL, SOURCE_IPTV_ORG_CN);
+        return TextUtils.isEmpty(url) ? SOURCE_IPTV_ORG_CN : url.trim();
+    }
+
+    public void setSourceUrl(String url) {
+        prefs.edit().putString(KEY_SOURCE_URL, url != null ? url.trim() : "").apply();
+    }
+
     public boolean isOnlyShowAvailable() {
         return prefs.getBoolean(KEY_ONLY_SHOW_AVAILABLE, false);
     }
@@ -131,8 +149,7 @@ public class IptvSettings {
     }
 
     public String getLastChannelUrl() {
-        return prefs.getString(KEY_LAST_CHANNEL_URL,
-                "http://10.255.126.3:8006/AHBKLIVE/00000001000000050000000000000152");
+        return prefs.getString(KEY_LAST_CHANNEL_URL, "");
     }
 
     public void setLastChannelUrl(String url) {

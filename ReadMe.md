@@ -2,6 +2,8 @@
 
 **uTV** 是一款专为 **北京联通 IPTV** 打造的 Android / Android TV 高性能直播播放器应用。项目基于 **bilibili/ijkplayer** 播放器内核深度定制，并完整集成 **wuwentao/bj-unicom-iptv** 的节目源规范与巡检能力，支持 4K 超高清（HEVC 50fps）、高清及标清全频道流畅播放、秒级切台以及局域网组播地址动态扫描。
 
+> **直播源订阅（v1.2.0 起）**：默认订阅 [iptv-org](https://github.com/iptv-org/iptv) 的中国公开频道列表（`https://iptv-org.github.io/iptv/countries/cn.m3u`，随包附带离线快照），普通宽带即可观看，无需 IPTV 业务。按遥控器 `菜单` 键可在「直播源」中填写任意 M3U 订阅地址、切换回内置安徽联通 IPTV 列表或导入本地文件；按 `绿键` 巡检全部频道后勾选「只显示可用」即可隐藏失效频道。公开源的可用性由源维护方决定，部分频道可能不稳定或有地区限制。`https://` 源由 ExoPlayer 播放（内置 ijk 原生库未编译 TLS）。
+>
 > **安徽联通版说明（v1.1.0 起）**：内置频道表已从北京联通切换为安徽联通 `app/src/main/assets/ah-unicom-iptv.m3u`（63 个频道，源自 [qiuhaotc/AnHuiLianTongIPTV](https://github.com/qiuhaotc/AnHuiLianTongIPTV)）。安徽联通源为 IPTV 内网单播地址（`http://10.255.x.x`，部分为 HLS），播放设备必须能访问 IPTV 专网；下文中的组播扫描、udpxy 与本地组播代理仅适用于 `rtp://` 组播源。应用包名为 `com.ahunicom.iptv`，可与北京版共存。下文其余内容为原北京联通版说明。
 
 ---

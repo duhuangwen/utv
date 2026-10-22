@@ -69,6 +69,7 @@ public class IjkVideoView extends FrameLayout {
 
     private Uri mUri;
     private String mRawChannelUrl;
+    private boolean mForceExoPlayer;
     private Map<String, String> mHeaders;
     private final TsHardwareAudioCompanion mHwAudioCompanion = new TsHardwareAudioCompanion();
 
@@ -209,6 +210,14 @@ public class IjkVideoView extends FrameLayout {
         mRawChannelUrl = rawChannelUrl;
     }
 
+    public void setForceExoPlayer(boolean forceExoPlayer) {
+        mForceExoPlayer = forceExoPlayer;
+    }
+
+    public boolean isUnicastSource() {
+        return mUri != null && !isMulticastSource(mUri);
+    }
+
     public void setVideoPath(String path) {
         if (!TextUtils.isEmpty(path)) {
             setVideoURI(Uri.parse(path));
@@ -300,7 +309,13 @@ public class IjkVideoView extends FrameLayout {
             }
 
             // 单播 HTTP 源，或非 IJK 模式 (ExoPlayer / AndroidMediaPlayer) 走常规播放器路径
-            mMediaPlayer = createFallbackPlayer(mSettings.getPlayerType());
+            int playerType = mSettings.getPlayerType();
+            // 内置 libijkffmpeg.so 未编译 TLS，https 源只能交给走系统 TLS 的 ExoPlayer
+            if (playerType == IptvSettings.PLAYER_IJK
+                    && (mForceExoPlayer || (scheme != null && scheme.equalsIgnoreCase("https")))) {
+                playerType = IptvSettings.PLAYER_IJK_EXO;
+            }
+            mMediaPlayer = createFallbackPlayer(playerType);
             attachPlayerListeners(mMediaPlayer);
             mMediaPlayer.setDataSource(mAppContext, playbackUri, mHeaders);
             bindSurfaceHolder(mMediaPlayer, mSurfaceHolder);

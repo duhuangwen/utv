@@ -37,7 +37,7 @@ jobs:
         id: apk
         run: |
           ver="${GITHUB_REF_NAME//\//-}"
-          out="uTV-ah-unicom-${ver}.apk"
+          out="uTV-${ver}.apk"
           cp app/build/outputs/apk/release/app-release.apk "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 
