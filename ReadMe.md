@@ -107,6 +107,30 @@ app/src/main/
 
 生成的 APK 位于 `app/build/outputs/apk/` 目录下，可通过 `adb install` 安装至电视盒子或手机。
 
+### Android 4.4.4 (API 19) 兼容构建
+
+分支 `compat-android-4.4` 提供可安装到 **Android 4.4.4 老机顶盒**（如中兴 ZXV10 B860AV1.1 / MSO9280）的构建，与主线 `minSdk 21` 的区别如下：
+
+| 改动 | 原因 |
+| :--- | :--- |
+| `minSdk 19` + `multiDexEnabled true` + `androidx.multidex` | API 19 不支持原生多 dex，`IptvApplication.attachBaseContext()` 在 API 21 以下手动 `MultiDex.install()` |
+| 4 个 `<ripple>` 背景拆到 `drawable-v21/`，`drawable/` 保留等价 `<selector>` | API 19 的资源解析器不认识 `<ripple>`，作为 `android:background` 时会直接 inflate 崩溃 |
+| launcher 图标矢量图移到 `drawable-anydpi-v21/`，并补充 `drawable-*dpi/ic_launcher.png` | 系统 `PackageManager.getApplicationIcon()` 在 API 19 无法解析 `<vector>`，图标会空白或抛异常 |
+| `View.setBackgroundTintList` / `View.setElevation` 改为 `ViewCompat` | 这两个方法都是 API 21 才有的，API 19 调用会 `NoSuchMethodError` |
+| `TsHardwareAudioCompanion` 增加 `getInputBuffers()`/`getOutputBuffers()` 旧接口分支 | `MediaCodec.getInputBuffer()`/`getOutputBuffer()`/`getOutputFormat()` 都是 API 21 方法 |
+
+已知限制（Android 4.4.4 上）：
+
+- **AC-3 / E-AC-3 杜比频道无声**：API 19 没有 `AudioTrack` IEC61937 直通（`ENCODING_AC3` 与 `AudioAttributes` 构造均为 API 21），伴音引擎会静默降级；H.264/HEVC 视频与 MP2/AAC 单声道/立体声频道正常。
+- 4.4.4 的 ROM 普遍没有 `audio/ac3` 解码器，硬解回退同样拿不到杜比音轨。
+- UI 使用 `Theme.Material3`，在 API 19 上会降级为无涟漪、无阴影的平铺样式（已在 API 19 Robolectric 冒烟测试中验证可正常启动）。
+
+自测命令（Robolectric 强制运行在 API 19 运行时上）：
+
+```bash
+./gradlew testDebugUnitTest --tests com.bjunicom.iptv.Android44StartupTest
+```
+
 ---
 
 ## 致谢 (Acknowledgments)

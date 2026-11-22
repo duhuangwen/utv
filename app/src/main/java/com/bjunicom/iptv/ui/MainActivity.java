@@ -25,6 +25,7 @@ import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
+import androidx.core.view.ViewCompat;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -257,7 +258,8 @@ public class MainActivity extends AppCompatActivity {
             View btn = hudButtons[i];
             if (btn != null) {
                 btn.setFocusable(true);
-                btn.setBackgroundTintList(null);
+                // setBackgroundTintList 是 API 21 方法，API 19 走 ViewCompat 兼容
+                ViewCompat.setBackgroundTintList(btn, null);
                 btn.setOnFocusChangeListener((v, hasFocus) -> {
                     if (hasFocus && drawerPanel.getVisibility() != View.VISIBLE) {
                         currentHudFocusIndex = btnIndex;
@@ -288,7 +290,7 @@ public class MainActivity extends AppCompatActivity {
             View btn = findViewById(id);
             if (btn != null) {
                 btn.setFocusable(true);
-                btn.setBackgroundTintList(null);
+                ViewCompat.setBackgroundTintList(btn, null);
                 btn.setOnFocusChangeListener(drawerFocusListener);
                 btn.setOnKeyListener((v, keyCode, event) -> {
                     if (event.getAction() != KeyEvent.ACTION_DOWN) {
@@ -372,8 +374,8 @@ public class MainActivity extends AppCompatActivity {
             boolean isTarget = showFocus && (i == currentHudFocusIndex);
             btn.setSelected(isTarget);
             btn.setBackgroundResource(isTarget ? R.drawable.bg_md3_primary_button : R.drawable.bg_group_tab);
-            btn.setBackgroundTintList(null);
-            btn.setElevation(isTarget ? 12f : 0f);
+            ViewCompat.setBackgroundTintList(btn, null);
+            ViewCompat.setElevation(btn, isTarget ? 12f : 0f);
             btn.setScaleX(isTarget ? 1.08f : 1.0f);
             btn.setScaleY(isTarget ? 1.08f : 1.0f);
         }

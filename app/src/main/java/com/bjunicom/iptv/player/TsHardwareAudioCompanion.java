@@ -3,6 +3,7 @@ package com.bjunicom.iptv.player;
 import android.media.MediaCodec;
 import android.media.MediaFormat;
 import android.net.Uri;
+import android.os.Build;
 import android.util.Log;
 
 import com.bjunicom.iptv.network.LocalMulticastProxyServer;
@@ -496,6 +497,11 @@ public class TsHardwareAudioCompanion {
             if (codec == null) {
                 return;
             }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+                // Android 4.4.4 (API 19) 没有 getInputBuffer/getOutputBuffer/getOutputFormat，走数组接口
+                feedElementaryStreamLegacy(codec, data, offset, length);
+                return;
+            }
             try {
                 int inIdx = codec.dequeueInputBuffer(10000);
                 if (inIdx >= 0) {
@@ -547,6 +553,57 @@ public class TsHardwareAudioCompanion {
             } catch (Throwable t) {
                 healthy = false;
                 Log.w(TAG, "Decode cycle error: " + t.getMessage());
+            }
+        }
+
+        /**
+         * Android 4.4.4 (API 19) 兼容解码循环：
+         * API 21 以下的 MediaCodec 只提供 getInputBuffers()/getOutputBuffers() 数组接口，
+         * 且没有 getOutputFormat()，因此输出采样率/声道数沿用配置值(48kHz 立体声)。
+         */
+        private void feedElementaryStreamLegacy(MediaCodec codec, byte[] data, int offset, int length) {
+            try {
+                int inIdx = codec.dequeueInputBuffer(10000);
+                if (inIdx >= 0) {
+                    ByteBuffer[] inputs = codec.getInputBuffers();
+                    if (inIdx < inputs.length && inputs[inIdx] != null) {
+                        ByteBuffer inBuf = inputs[inIdx];
+                        inBuf.clear();
+                        int copyLen = Math.min(length, inBuf.remaining());
+                        inBuf.put(data, offset, copyLen);
+                        codec.queueInputBuffer(inIdx, 0, copyLen, presentationTimeUs, 0);
+                        presentationTimeUs += 24000;
+                    }
+                }
+
+                MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+                ByteBuffer[] outputs = codec.getOutputBuffers();
+                while (running.get()) {
+                    int outIdx = codec.dequeueOutputBuffer(info, 0);
+                    if (outIdx == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
+                        outputs = codec.getOutputBuffers();
+                    } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        // API 19 无法查询新格式，按配置值补建 AudioTrack
+                        if (pooledSlot.audioTrack == null) {
+                            pooledSlot.audioTrack = CodecDecoderPool.createPcmAudioTrack(
+                                    pooledSlot.sampleRate, pooledSlot.channelCount);
+                        }
+                    } else if (outIdx >= 0) {
+                        ByteBuffer outBuf = outIdx < outputs.length ? outputs[outIdx] : null;
+                        if (outBuf != null && info.size > 0 && pooledSlot.audioTrack != null) {
+                            byte[] pcm = new byte[info.size];
+                            outBuf.position(info.offset);
+                            outBuf.get(pcm, 0, info.size);
+                            pooledSlot.audioTrack.write(pcm, 0, pcm.length);
+                        }
+                        codec.releaseOutputBuffer(outIdx, false);
+                    } else {
+                        break;
+                    }
+                }
+            } catch (Throwable t) {
+                healthy = false;
+                Log.w(TAG, "Decode cycle error (legacy API<21): " + t.getMessage());
             }
         }
 

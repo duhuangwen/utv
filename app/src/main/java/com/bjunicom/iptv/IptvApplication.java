@@ -3,7 +3,10 @@ package com.bjunicom.iptv;
 import android.app.Application;
 import android.content.Context;
 import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.util.Log;
+
+import androidx.multidex.MultiDex;
 
 import com.bjunicom.iptv.network.LocalMulticastProxyServer;
 
@@ -25,6 +28,17 @@ public class IptvApplication extends Application {
 
     private WifiManager.MulticastLock multicastLock;
     private LocalMulticastProxyServer localProxyServer;
+
+    /**
+     * Android 4.4.4 (API 19) 不支持原生多 dex，需在 API 21 以下手动安装次 dex。
+     */
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(base);
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            MultiDex.install(this);
+        }
+    }
 
     @Override
     public void onCreate() {
